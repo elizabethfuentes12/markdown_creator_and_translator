@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 import html2text
 import translate
+import shutil
 
 # brew install pandoc
 
@@ -62,7 +63,18 @@ def load_image_as_content(image_path):
 
     return { "type": "image","source": { "type": "base64", "media_type": media_type,"data": content_image}}
 
-def convert_html_component_to_markdown(url, element_type, output_file):
+def convert_html_component_to_markdown(url):
+
+    url_domain = f"{url.split("/")[2]}"
+    if url.split("/")[-1] == "":
+        output_md_file = f"markdown_files/{url.split('/')[-2]}.md"
+    if url_domain == "aws.amazon.com":
+        element_type = "section"
+    elif url_domain == "community.aws":
+        element_type = "article"
+    else:
+        print("EROR - Create a new element_type for: ", url_domain)
+        return
     try:
         # Fetch the HTML content from the URL
         response = requests.get(url)
@@ -76,24 +88,24 @@ def convert_html_component_to_markdown(url, element_type, output_file):
         element = soup.find(element_type)
 
         if element:
-            #tag = element.div
-            #soup_2 = BeautifulSoup(str(tag), 'html.parser')
+
             # Convertir el HTML a Markdown utilizando la biblioteca html2text
             md_converter = html2text.HTML2Text()
             md_converter.body_width = 0  # Evita el ajuste de línea automático
             markdown = md_converter.handle(element.prettify())
-            with open(output_file, 'w') as file:
+            with open(output_md_file, 'w') as file:
                 file.write(markdown)
-            print(f"Conversion successful. Markdown file saved as {output_file}")
-            return markdown
+            print(f"Conversion successful. Markdown file saved as {output_md_file}")
         else:
             print(f"Element not found with the tag: {element_type}")
     except requests.exceptions.RequestException as e:
         print(f"Error occurred while fetching the HTML content: {e}")
+    return output_md_file
 
 
 def split_markdown_file(file_path, chunk_size=2500, output_dir='output'):
     # Leer el contenido del archivo Markdown
+    borrar_contenido_carpeta(output_dir)
     with open(file_path, 'r') as file:
         content = file.read()
 
@@ -138,8 +150,9 @@ def split_markdown_file(file_path, chunk_size=2500, output_dir='output'):
             file.write(current_chunk)
 
     print(f"El archivo {file_path} se ha dividido en {chunk_counter} chunks en el directorio {output_dir}.")
+    return output_dir
 
-def join_markdown_files(input_dir, output_file,language):
+def translate_and_join_markdown_files(chat,input_dir, output_file,language):
     # Obtener la lista de archivos Markdown en el directorio de entrada
     markdown_files = [file for file in os.listdir(input_dir) if file.endswith('.md')]
 
@@ -151,6 +164,7 @@ def join_markdown_files(input_dir, output_file,language):
         # Recorrer los archivos Markdown
         for file in markdown_files:
             file_path = os.path.join(input_dir, file)
+            print("translate_review",file_path)
             old_blog_content = load_with_images(file_path)
             translate_review = translate.get_suggestions(chat, old_blog_content,language)
 
@@ -159,6 +173,55 @@ def join_markdown_files(input_dir, output_file,language):
 
             # Agregar una línea en blanco entre los archivos
             output.write('\n\n')
-
+    borrar_contenido_carpeta(input_dir)
     print(f"Los archivos Markdown en {input_dir} se han unido en el archivo {output_file}.")
 
+def create_markdown(input_file):
+    try: 
+        if input_file.endswith('.docx'):
+            print("Converting .docx to .md")
+            output_file = convert_docx_to_markdown(input_file)
+            print(f"Conversion complete: Review the {output_file} before continuing.")
+        elif input_file.startswith("https"):
+            print("Converting .html to .md")
+            output_file = convert_html_component_to_markdown(input_file)
+            print(f"Conversion complete: Review the {output_file} before continuing.")
+        else:
+            print(f"ERROR: {input_file} File type not supported: ")
+            return
+    except Exception as e:
+        print("Error converting file:", e)
+        raise ValueError("Error converting file:", e)
+    return output_file
+
+def translate_markdown(chat,markdown_file,language):
+    translate_markdown_file = f"{markdown_file.split(".")[0]}_{language}.md"
+    output_dir = split_markdown_file(markdown_file)
+    translate_and_join_markdown_files(chat,output_dir, translate_markdown_file,language)
+    return translate_markdown_file
+
+def borrar_contenido_carpeta(ruta_carpeta):
+    """
+    Borra el contenido de una carpeta.
+    
+    Args:
+        ruta_carpeta (str): La ruta de la carpeta cuyo contenido se desea borrar.
+    """
+    # Verificar si la carpeta existe
+    if os.path.exists(ruta_carpeta):
+        # Recorrer todos los archivos y subcarpetas dentro de la carpeta
+        for archivo in os.listdir(ruta_carpeta):
+            # Obtener la ruta completa del archivo o subcarpeta
+            ruta_archivo = os.path.join(ruta_carpeta, archivo)
+            
+            # Si es un archivo, eliminarlo
+            if os.path.isfile(ruta_archivo):
+                os.remove(ruta_archivo)
+            
+            # Si es una subcarpeta, eliminarla junto con su contenido
+            elif os.path.isdir(ruta_archivo):
+                shutil.rmtree(ruta_archivo)
+        
+        print(f"Se ha borrado el contenido de la carpeta: {ruta_carpeta}")
+    else:
+        print(f"La carpeta {ruta_carpeta} no existe.")
