@@ -1,0 +1,4 @@
+boto3
+langchain-aws
+bs4
+html2text
